@@ -1,0 +1,14 @@
+{
+    "id": "dockerBar",
+    "name": "DockerBar",
+    "description": "Docker container health monitor - shows local and remote container status",
+    "version": "0.1.0",
+    "author": "gabriel",
+    "type": "widget",
+    "capabilities": ["dankbar-widget", "monitoring"],
+    "component": "./DockerBarWidget.qml",
+    "icon": "dns",
+    "settings": "./DockerBarSettings.qml",
+    "requires": ["bun", "docker"],
+    "permissions": ["settings_read", "settings_write", "process", "network"]
+}
