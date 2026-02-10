@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import Quickshell
 import qs.Common
 import qs.Services
@@ -53,6 +54,39 @@ PluginComponent {
         if (!proj.allHealthy) return "#E5A100"
         if (proj.running < proj.total) return Theme.error
         return Theme.primary
+    }
+
+    function runDockerAction(containerId, hostInfo, action) {
+        var dockerArgs = [action]
+        if (action === "stop" || action === "restart") dockerArgs.push("-t", "2")
+        dockerArgs.push(containerId)
+
+        var args
+        if (hostInfo === "localhost") {
+            args = ["docker"].concat(dockerArgs)
+        } else {
+            args = ["ssh", "-i", root.sshKey, "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=no",
+                    hostInfo, "docker"].concat(dockerArgs)
+        }
+        console.log("DockerBar: running", action, "on", containerId, "host:", hostInfo, "args:", JSON.stringify(args))
+        Proc.runCommand(
+            "dockerBar.action",
+            args,
+            (stdout, exitCode) => {
+                console.log("DockerBar:", action, "exitCode:", exitCode, "stdout:", stdout.trim())
+                root.fetchContainers()
+            },
+            30000
+        )
+    }
+
+    function copyToClipboard(text) {
+        Proc.runCommand(
+            "dockerBar.copy",
+            ["wl-copy", "--", text],
+            () => {},
+            5000
+        )
     }
 
     Timer {
@@ -283,43 +317,53 @@ PluginComponent {
                                                 width: mainCol.width
                                                 height: 28
 
+                                                HoverHandler {
+                                                    id: containerHover
+                                                }
+
+                                                property bool hovered: containerHover.hovered
+
                                                 StyledRect {
                                                     anchors.fill: parent
                                                     anchors.leftMargin: 12
                                                     radius: Theme.cornerRadius
-                                                    color: modelData.health === "stopped" || modelData.health === "unhealthy"
-                                                        ? Qt.rgba(Theme.error.r, Theme.error.g, Theme.error.b, 0.06)
-                                                        : "transparent"
+                                                    color: hovered
+                                                        ? Qt.rgba(Theme.surfaceText.r, Theme.surfaceText.g, Theme.surfaceText.b, 0.08)
+                                                        : (modelData.health === "stopped" || modelData.health === "unhealthy"
+                                                            ? Qt.rgba(Theme.error.r, Theme.error.g, Theme.error.b, 0.06)
+                                                            : "transparent")
+
+                                                    // Container info (left)
+                                                    Rectangle {
+                                                        id: healthDot
+                                                        width: 6; height: 6; radius: 3
+                                                        anchors.left: parent.left
+                                                        anchors.leftMargin: Theme.spacingXS
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        color: root.healthColor(modelData.health)
+                                                    }
+
+                                                    StyledText {
+                                                        id: serviceText
+                                                        anchors.left: healthDot.right
+                                                        anchors.leftMargin: Theme.spacingS
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        width: Math.min(implicitWidth, parent.width * 0.35)
+                                                        text: modelData.service
+                                                        color: Theme.surfaceText
+                                                        font.pixelSize: Theme.fontSizeSmall - 1
+                                                        elide: Text.ElideRight
+                                                    }
 
                                                     Row {
-                                                        anchors.fill: parent
-                                                        anchors.leftMargin: Theme.spacingXS
-                                                        anchors.rightMargin: Theme.spacingXS
+                                                        anchors.left: serviceText.right
+                                                        anchors.leftMargin: Theme.spacingS
+                                                        anchors.verticalCenter: parent.verticalCenter
                                                         spacing: Theme.spacingS
+                                                        visible: !hovered
 
-                                                        // Health dot
-                                                        Rectangle {
-                                                            width: 6
-                                                            height: 6
-                                                            radius: 3
-                                                            anchors.verticalCenter: parent.verticalCenter
-                                                            color: root.healthColor(modelData.health)
-                                                        }
-
-                                                        // Service name
                                                         StyledText {
                                                             anchors.verticalCenter: parent.verticalCenter
-                                                            width: parent.width * 0.3
-                                                            text: modelData.service
-                                                            color: Theme.surfaceText
-                                                            font.pixelSize: Theme.fontSizeSmall - 1
-                                                            elide: Text.ElideRight
-                                                        }
-
-                                                        // Port
-                                                        StyledText {
-                                                            anchors.verticalCenter: parent.verticalCenter
-                                                            width: parent.width * 0.2
                                                             text: modelData.ports || ""
                                                             color: Theme.primary
                                                             font.pixelSize: Theme.fontSizeSmall - 2
@@ -327,13 +371,134 @@ PluginComponent {
                                                             visible: text !== ""
                                                         }
 
-                                                        // Uptime
                                                         StyledText {
                                                             anchors.verticalCenter: parent.verticalCenter
                                                             text: modelData.uptime || ""
                                                             color: Theme.surfaceContainerHighest
                                                             font.pixelSize: Theme.fontSizeSmall - 2
                                                             visible: text !== ""
+                                                        }
+                                                    }
+
+                                                    // Action buttons (right, on hover)
+                                                    Row {
+                                                        anchors.right: parent.right
+                                                        anchors.rightMargin: Theme.spacingXS
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        spacing: 2
+                                                        visible: hovered
+
+                                                        // Copy name
+                                                        Rectangle {
+                                                            width: 22; height: 22; radius: 4
+                                                            color: copyNameHover.hovered ? Qt.rgba(Theme.surfaceText.r, Theme.surfaceText.g, Theme.surfaceText.b, 0.12) : "transparent"
+                                                            ToolTip.visible: copyNameHover.hovered
+                                                            ToolTip.text: "Copy name"
+                                                            ToolTip.delay: 400
+                                                            HoverHandler {
+                                                                id: copyNameHover
+                                                                cursorShape: Qt.PointingHandCursor
+                                                            }
+                                                            TapHandler {
+                                                                onTapped: root.copyToClipboard(modelData.name)
+                                                            }
+                                                            DankIcon {
+                                                                anchors.centerIn: parent
+                                                                name: "content_copy"
+                                                                size: 13
+                                                                color: copyNameHover.hovered ? Theme.surfaceText : Theme.surfaceVariantText
+                                                            }
+                                                        }
+
+                                                        // Copy ID
+                                                        Rectangle {
+                                                            width: 22; height: 22; radius: 4
+                                                            color: copyIdHover.hovered ? Qt.rgba(Theme.surfaceText.r, Theme.surfaceText.g, Theme.surfaceText.b, 0.12) : "transparent"
+                                                            ToolTip.visible: copyIdHover.hovered
+                                                            ToolTip.text: "Copy ID"
+                                                            ToolTip.delay: 400
+                                                            HoverHandler {
+                                                                id: copyIdHover
+                                                                cursorShape: Qt.PointingHandCursor
+                                                            }
+                                                            TapHandler {
+                                                                onTapped: root.copyToClipboard(modelData.id)
+                                                            }
+                                                            DankIcon {
+                                                                anchors.centerIn: parent
+                                                                name: "tag"
+                                                                size: 13
+                                                                color: copyIdHover.hovered ? Theme.surfaceText : Theme.surfaceVariantText
+                                                            }
+                                                        }
+
+                                                        // Restart (running only)
+                                                        Rectangle {
+                                                            width: 22; height: 22; radius: 4
+                                                            visible: modelData.state === "running"
+                                                            color: restartHover.hovered ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.15) : "transparent"
+                                                            ToolTip.visible: restartHover.hovered
+                                                            ToolTip.text: "Restart"
+                                                            ToolTip.delay: 400
+                                                            HoverHandler {
+                                                                id: restartHover
+                                                                cursorShape: Qt.PointingHandCursor
+                                                            }
+                                                            TapHandler {
+                                                                onTapped: root.runDockerAction(modelData.id, hostData.host, "restart")
+                                                            }
+                                                            DankIcon {
+                                                                anchors.centerIn: parent
+                                                                name: "restart_alt"
+                                                                size: 13
+                                                                color: restartHover.hovered ? Theme.primary : Theme.surfaceVariantText
+                                                            }
+                                                        }
+
+                                                        // Stop (running only)
+                                                        Rectangle {
+                                                            width: 22; height: 22; radius: 4
+                                                            visible: modelData.state === "running"
+                                                            color: stopHover.hovered ? Qt.rgba(Theme.error.r, Theme.error.g, Theme.error.b, 0.15) : "transparent"
+                                                            ToolTip.visible: stopHover.hovered
+                                                            ToolTip.text: "Stop"
+                                                            ToolTip.delay: 400
+                                                            HoverHandler {
+                                                                id: stopHover
+                                                                cursorShape: Qt.PointingHandCursor
+                                                            }
+                                                            TapHandler {
+                                                                onTapped: root.runDockerAction(modelData.id, hostData.host, "stop")
+                                                            }
+                                                            DankIcon {
+                                                                anchors.centerIn: parent
+                                                                name: "stop_circle"
+                                                                size: 13
+                                                                color: stopHover.hovered ? Theme.error : Theme.surfaceVariantText
+                                                            }
+                                                        }
+
+                                                        // Start (stopped only)
+                                                        Rectangle {
+                                                            width: 22; height: 22; radius: 4
+                                                            visible: modelData.state !== "running"
+                                                            color: startHover.hovered ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.15) : "transparent"
+                                                            ToolTip.visible: startHover.hovered
+                                                            ToolTip.text: "Start"
+                                                            ToolTip.delay: 400
+                                                            HoverHandler {
+                                                                id: startHover
+                                                                cursorShape: Qt.PointingHandCursor
+                                                            }
+                                                            TapHandler {
+                                                                onTapped: root.runDockerAction(modelData.id, hostData.host, "start")
+                                                            }
+                                                            DankIcon {
+                                                                anchors.centerIn: parent
+                                                                name: "play_arrow"
+                                                                size: 13
+                                                                color: startHover.hovered ? Theme.primary : Theme.surfaceVariantText
+                                                            }
                                                         }
                                                     }
                                                 }
